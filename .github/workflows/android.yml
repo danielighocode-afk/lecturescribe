@@ -1,0 +1,48 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install packages
+        run: npm install
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Create the Android project
+        run: npx cap add android
+
+      - name: Patch permissions, icon and screen-on
+        run: bash scripts/patch-android.sh
+
+      - name: Copy the web app into Android
+        run: npx cap sync android
+
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Save the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LectureScribe-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

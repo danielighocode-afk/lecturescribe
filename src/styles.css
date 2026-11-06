@@ -1,0 +1,335 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-bg: 246 244 252;
+  --c-surface: 255 255 255;
+  --c-surface2: 240 235 252;
+  --c-ink: 28 20 48;
+  --c-muted: 102 94 128;
+  --c-line: 228 224 240;
+  --c-primary: 109 40 217;
+  --c-primarysoft: 240 234 253;
+  --c-onprimary: 255 255 255;
+  --c-lav: 217 70 239;
+  --c-lavsoft: 250 232 250;
+  --c-lavink: 162 28 175;
+  --c-teal: 13 148 136;
+  --c-m1: 109 40 217;
+  --c-m2: 180 83 9;
+  --c-m3: 192 38 211;
+  --c-amber: 245 184 61;
+  --c-ambersoft: 255 246 221;
+  --c-amberink: 138 90 0;
+  --c-coral: 229 72 77;
+  --c-coralsoft: 253 236 236;
+}
+
+:root[data-theme='dark'] {
+  --c-bg: 14 11 26;
+  --c-surface: 24 19 42;
+  --c-surface2: 33 27 58;
+  --c-ink: 237 233 250;
+  --c-muted: 164 156 192;
+  --c-line: 44 37 72;
+  --c-primary: 167 139 250;
+  --c-primarysoft: 41 32 76;
+  --c-onprimary: 28 12 64;
+  --c-lav: 232 121 249;
+  --c-lavsoft: 58 28 66;
+  --c-lavink: 240 171 252;
+  --c-teal: 45 212 163;
+  --c-m1: 139 108 240;
+  --c-m2: 192 132 24;
+  --c-m3: 190 79 211;
+  --c-amber: 247 198 90;
+  --c-ambersoft: 58 48 20;
+  --c-amberink: 247 211 130;
+  --c-coral: 255 107 107;
+  --c-coralsoft: 58 29 34;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light;
+  }
+
+  html[data-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: rgb(var(--c-bg));
+    color: rgb(var(--c-ink));
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: 'Bricolage Grotesque', Figtree, ui-sans-serif, system-ui,
+      sans-serif;
+  }
+
+  button {
+    touch-action: manipulation;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-surface;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-ink outline-none placeholder:text-muted/70 focus:border-primary focus:ring-2 focus:ring-primary/25;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3.5 font-semibold text-onprimary active:opacity-90;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-line bg-surface px-4 py-3.5 font-semibold text-ink active:bg-surface2;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-coral px-4 py-3.5 font-semibold text-onprimary active:opacity-90;
+  }
+
+  .iconbtn {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink active:bg-surface2;
+  }
+
+  .pill {
+    @apply shrink-0 rounded-full border border-line bg-surface px-4 py-2 text-sm font-semibold text-muted;
+  }
+
+  .pill-on {
+    @apply border-transparent bg-primary text-onprimary;
+  }
+
+  .ctl-sm {
+    @apply flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-surface text-ink active:bg-surface2;
+  }
+
+  .ctl-big {
+    @apply flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full text-white shadow-lg;
+  }
+}
+
+.h-screen-safe {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.aurora {
+  background:
+    radial-gradient(
+      120% 90% at 88% 0%,
+      rgba(217, 70, 239, 0.45) 0%,
+      rgba(217, 70, 239, 0) 55%
+    ),
+    radial-gradient(
+      90% 90% at 0% 100%,
+      rgba(124, 58, 237, 0.55) 0%,
+      rgba(124, 58, 237, 0) 60%
+    ),
+    linear-gradient(160deg, #1b0f40, #2b1a66 60%, #43207f);
+}
+
+.aurora-btn {
+  background: linear-gradient(135deg, #6d28d9, #b15cf5);
+  color: #ffffff;
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.3s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot {
+    animation: none;
+  }
+}
+
+.seg-text {
+  outline: none;
+  white-space: pre-wrap;
+  border-radius: 8px;
+}
+
+.seg-text:focus {
+  background: rgb(var(--c-primarysoft));
+  box-shadow: 0 0 0 4px rgb(var(--c-primarysoft));
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- motion ---------- */
+
+button {
+  transition:
+    transform 0.15s ease,
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+.card,
+.field {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease;
+}
+
+.screen-in {
+  animation: screen-in 0.24s ease-out both;
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#modal-root {
+  animation: fade-in 0.18s ease both;
+}
+
+#modal-root > div {
+  animation: sheet-in 0.3s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.toast-in {
+  animation: toast-in 0.22s ease-out both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.25s ease-out both;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- charts ---------- */
+
+.bar-y {
+  transform-origin: bottom;
+  animation: grow-y 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.bar-x {
+  transform-origin: left;
+  animation: grow-x 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.chart-hit:hover [data-tip-anchor],
+.chart-hit:focus-visible [data-tip-anchor] {
+  filter: brightness(1.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+  }
+}

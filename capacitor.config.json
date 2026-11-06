@@ -1,0 +1,9 @@
+{
+  "appId": "com.lecturescribe.app",
+  "appName": "LectureScribe",
+  "webDir": "dist",
+  "backgroundColor": "#1B0F40",
+  "server": {
+    "androidScheme": "https"
+  }
+}
