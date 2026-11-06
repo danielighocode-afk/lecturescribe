@@ -277,6 +277,11 @@ const ICONS: Record<string, string> = {
   help: "<circle cx='12' cy='12' r='10'/><path d='M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01'/>",
   eye: "<path d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z'/><circle cx='12' cy='12' r='3'/>",
   wave: "<path d='M2 12h2M6 8v8M10 4v16M14 7v10M18 9v6M22 12h-2'/>",
+  mail: "<rect x='2' y='4' width='20' height='16' rx='2'/><path d='m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7'/>",
+  lock: "<rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/>",
+  eyeoff:
+    "<path d='M9.9 9.9a3 3 0 1 0 4.2 4.2'/><path d='M10.7 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7'/><path d='M6.6 6.6A13.5 13.5 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6'/><path d='m2 2 20 20'/>",
+  x: "<path d='M18 6 6 18M6 6l12 12'/>",
 };
 
 function ic(name: string, size = 20, fill = false): string {
@@ -315,6 +320,10 @@ let cloudOn = false;
 let syncLabel = '';
 let pendingName = '';
 let search = '';
+const RECENT_KEY = 'lecturescribe-recent-search-v1';
+let recentSearches: string[] = loadJSON<string[]>(RECENT_KEY, []);
+const collapsedCourses = new Set<string>();
+let splashGone = false;
 let timeFilter: 'all' | 'recent' | 'week' | 'month' = 'all';
 let courseFilter = '';
 let notesFilter: 'all' | 'starred' | 'typed' = 'all';
@@ -1616,13 +1625,44 @@ function go(path: string): void {
   }
 }
 
+function hideSplash(): void {
+  if (splashGone) {
+    return;
+  }
+  splashGone = true;
+  const el = document.getElementById('splash');
+  if (!el) {
+    return;
+  }
+  /* show the opening animation for at least a moment so it never just flashes */
+  const wait = Math.max(0, 1000 - performance.now());
+  window.setTimeout(() => {
+    el.classList.add('out');
+    window.setTimeout(() => el.remove(), 700);
+  }, wait);
+}
+
+function staggerIn(): void {
+  let i = 0;
+  root.querySelectorAll<HTMLElement>('.card, .btn-ghost').forEach(el => {
+    if (i < 14) {
+      el.classList.add('stagger-in');
+      el.style.setProperty('--i', String(i));
+    }
+    i++;
+  });
+}
+
 function render(): void {
+  if (authState !== 'loading') {
+    hideSplash();
+  }
   if (authState !== 'in') {
     closeModal();
     hideTip();
     stopWaveLoop();
     if (authState === 'loading') {
-      root.innerHTML = `<div class='flex min-h-screen items-center justify-center'><p class='font-display text-xl font-bold text-muted'>LectureScribe</p></div>`;
+      root.innerHTML = '';
     } else {
       renderAuth();
     }
@@ -1668,6 +1708,7 @@ function render(): void {
     if (first) {
       first.classList.add('screen-in');
     }
+    staggerIn();
   }
 }
 
@@ -2062,6 +2103,204 @@ function inTime(n: Note): boolean {
   return true;
 }
 
+/* ---------- search with helper ---------- */
+
+type SearchScope = 'lectures' | 'notes';
+
+const SEARCH_CFG: Record<SearchScope, { input: string; ph: string; label: string }> = {
+  lectures: {
+    input: 'search',
+    ph: 'Search courses, lectures or dates',
+    label: 'Search lectures',
+  },
+  notes: { input: 'notes-search', ph: 'Search your notes', label: 'Search notes' },
+};
+
+function getQ(sc: SearchScope): string {
+  return sc === 'notes' ? notesSearch : search;
+}
+
+function setQ(sc: SearchScope, v: string): void {
+  if (sc === 'notes') {
+    notesSearch = v;
+  } else {
+    search = v;
+  }
+}
+
+function runSearch(sc: SearchScope): void {
+  if (sc === 'notes') {
+    renderNotesList();
+  } else {
+    renderLectureList();
+  }
+}
+
+function saveRecent(): void {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+  } catch {
+    /* recent searches just will not persist */
+  }
+}
+
+function addRecent(q: string): void {
+  const t = q.trim();
+  if (t.length < 2) {
+    return;
+  }
+  recentSearches = [t].concat(recentSearches.filter(r => r.toLowerCase() !== t.toLowerCase())).slice(0, 6);
+  saveRecent();
+}
+
+function dateHay(n: Note): string {
+  return (
+    fmtDate(n.createdAt) +
+    ' ' +
+    new Date(n.createdAt).toLocaleDateString('en-GB', { weekday: 'long', month: 'long' })
+  );
+}
+
+/* escapes the text and marks the first place the search words appear */
+function hl(text: string, q: string): string {
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) {
+    return esc(text);
+  }
+  return (
+    esc(text.slice(0, i)) +
+    "<mark class='hl'>" +
+    esc(text.slice(i, i + q.length)) +
+    '</mark>' +
+    esc(text.slice(i + q.length))
+  );
+}
+
+function snippet(text: string, q: string): string {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  const start = Math.max(0, i - 28);
+  const end = Math.min(text.length, i + q.length + 60);
+  return (start > 0 ? '...' : '') + text.slice(start, end) + (end < text.length ? '...' : '');
+}
+
+function helperHtml(sc: SearchScope): string {
+  const q = getQ(sc).trim();
+  const ql = q.toLowerCase();
+  const row = (icon: string, title: string, sub: string, attrs: string) =>
+    `<button type='button' ${attrs} data-scope='${sc}' class='help-row'><span class='help-ico'>${ic(icon, 16)}</span><span class='min-w-0 flex-1'><span class='block truncate text-sm font-semibold'>${title}</span><span class='block truncate text-xs text-muted'>${sub}</span></span></button>`;
+  const counts = new Map<string, number>();
+  for (const n of notes) {
+    if (n.course) {
+      counts.set(n.course, (counts.get(n.course) || 0) + 1);
+    }
+  }
+  const courseList = Array.from(counts.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+
+  if (!q) {
+    let out = '';
+    if (recentSearches.length) {
+      out += `<div class='flex items-center justify-between px-2 pt-1'><p class='help-label'>Recent searches</p><button type='button' data-action='recent-clear' data-scope='${sc}' class='text-xs font-semibold text-primary'>Clear</button></div>
+        <div class='flex flex-wrap gap-2 px-2 pb-2'>${recentSearches
+          .map(
+            r =>
+              `<button type='button' data-action='search-pick' data-scope='${sc}' data-v='${esc(r)}' class='help-chip'>${ic('clock', 12)}${esc(r)}</button>`
+          )
+          .join('')}</div>`;
+    }
+    if (courseList.length) {
+      out += `<p class='help-label px-2 pt-1'>Browse by course</p>
+        <div class='flex flex-wrap gap-2 px-2 pb-2'>${courseList
+          .map(
+            c =>
+              `<button type='button' data-action='search-pick' data-scope='${sc}' data-v='${esc(c[0])}' class='help-chip'>${esc(c[0])}<span class='text-muted'>${c[1]}</span></button>`
+          )
+          .join('')}</div>`;
+    }
+    out += `<p class='px-2 pb-1 pt-1 text-xs leading-relaxed text-muted'>Try a course code, a lecture title, a month like "Oct", or a word your lecturer said.</p>`;
+    return out;
+  }
+
+  const courseHits = courseList.filter(c => c[0].toLowerCase().includes(ql)).slice(0, 4);
+  const byRecent = [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
+  const lectureHits = byRecent.filter(n => (n.title + ' ' + dateHay(n)).toLowerCase().includes(ql)).slice(0, 4);
+  const textHits: { n: Note; s: Segment }[] = [];
+  for (const n of byRecent) {
+    if (textHits.length >= 4) {
+      break;
+    }
+    for (const s of n.segments) {
+      if (sc === 'notes' && !(s.mark || s.typed)) {
+        continue;
+      }
+      if (s.text.toLowerCase().includes(ql)) {
+        textHits.push({ n: n, s: s });
+        break;
+      }
+    }
+  }
+
+  let out = '';
+  if (courseHits.length) {
+    out += `<p class='help-label px-2 pt-1'>Courses</p>${courseHits
+      .map(c =>
+        row('layers', hl(c[0], q), c[1] + (c[1] === 1 ? ' lecture' : ' lectures'), `data-action='search-pick' data-v='${esc(c[0])}'`)
+      )
+      .join('')}`;
+  }
+  if (lectureHits.length) {
+    out += `<p class='help-label px-2 pt-2'>Lectures and dates</p>${lectureHits
+      .map(n =>
+        row('book', hl(n.title, q), (n.course ? esc(n.course) + ' - ' : '') + hl(fmtDate(n.createdAt), q), `data-action='search-open' data-id='${n.id}'`)
+      )
+      .join('')}`;
+  }
+  if (textHits.length) {
+    out += `<p class='help-label px-2 pt-2'>What was said</p>${textHits
+      .map(h =>
+        row('notes', hl(snippet(h.s.text, q), q), esc(h.n.title) + ' - ' + fmtTime(h.s.t), `data-action='search-open' data-id='${h.n.id}'`)
+      )
+      .join('')}`;
+  }
+  if (!out) {
+    return `<p class='px-3 py-4 text-center text-sm text-muted'>Nothing matches "${esc(q)}". Check the spelling or try fewer letters.</p>`;
+  }
+  out += `<button type='button' data-action='search-pick' data-scope='${sc}' data-v='${esc(q)}' class='help-all'>Show all results for "${esc(q)}"</button>`;
+  return out;
+}
+
+function showHelper(sc: SearchScope): void {
+  const el = document.getElementById(SEARCH_CFG[sc].input + '-help');
+  if (el) {
+    el.innerHTML = helperHtml(sc);
+    el.hidden = false;
+  }
+}
+
+function hideHelper(sc: SearchScope): void {
+  const el = document.getElementById(SEARCH_CFG[sc].input + '-help');
+  if (el) {
+    el.hidden = true;
+  }
+}
+
+function syncClear(sc: SearchScope): void {
+  const btn = document.querySelector(`[data-action='search-clear'][data-scope='${sc}']`);
+  if (btn) {
+    btn.classList.toggle('hidden', !getQ(sc));
+  }
+}
+
+function searchBar(sc: SearchScope): string {
+  const cfg = SEARCH_CFG[sc];
+  const val = getQ(sc);
+  return `<div class='relative mt-5'>
+    <span class='pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted'>${ic('search', 18)}</span>
+    <input id='${cfg.input}' type='text' inputmode='search' enterkeyhint='search' autocomplete='off' autocapitalize='none' spellcheck='false' value='${esc(val)}' placeholder='${cfg.ph}' class='field !pl-10 !pr-11' aria-label='${cfg.label}'>
+    <button type='button' data-action='search-clear' data-scope='${sc}' aria-label='Clear search' class='absolute right-1.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-muted ${val ? '' : 'hidden'}'>${ic('x', 16)}</button>
+    <div id='${cfg.input}-help' class='search-help' hidden></div>
+  </div>`;
+}
+
 function renderLectures(): void {
   const courses = Array.from(new Set(notes.map(n => n.course).filter(c => !!c))).sort();
   const pill = (v: string, label: string) =>
@@ -2069,11 +2308,8 @@ function renderLectures(): void {
   root.innerHTML = shell(
     `<div class='mx-auto max-w-xl px-5 pb-32 pt-safe-6'>
       <h1 class='font-display text-3xl font-bold'>My lectures</h1>
-      <p class='mt-1 text-sm text-muted'>All your recorded lectures in one place.</p>
-      <div class='relative mt-5'>
-        <span class='pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted'>${ic('search', 18)}</span>
-        <input id='search' type='search' value='${esc(search)}' placeholder='Search courses or lectures' class='field !pl-10' aria-label='Search lectures'>
-      </div>
+      <p class='mt-1 text-sm text-muted'>Your lectures, organised by course with the dates each was recorded.</p>
+      ${searchBar('lectures')}
       <div class='no-scrollbar mt-3 flex gap-2 overflow-x-auto'>
         ${pill('all', 'All')}${pill('recent', 'Recent')}${pill('week', 'This week')}${pill('month', 'This month')}
       </div>
@@ -2095,47 +2331,86 @@ function renderLectureList(): void {
     return;
   }
   const q = search.trim().toLowerCase();
-  const list = notes
-    .filter(n => {
-      if (courseFilter && n.course !== courseFilter) {
-        return false;
-      }
-      if (!inTime(n)) {
-        return false;
-      }
-      if (!q) {
-        return true;
-      }
-      const hay = (n.title + ' ' + n.course + ' ' + n.segments.map(s => s.text).join(' ')).toLowerCase();
-      return hay.includes(q);
-    })
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const list = notes.filter(n => {
+    if (courseFilter && n.course !== courseFilter) {
+      return false;
+    }
+    if (!inTime(n)) {
+      return false;
+    }
+    if (!q) {
+      return true;
+    }
+    const hay = (n.title + ' ' + n.course + ' ' + dateHay(n) + ' ' + n.segments.map(s => s.text).join(' ')).toLowerCase();
+    return hay.includes(q);
+  });
   if (!list.length) {
     el.innerHTML = notes.length
-      ? `<p class='py-10 text-center text-muted'>No notes match your search.</p>`
+      ? `<p class='py-10 text-center text-muted'>No lectures match your search.</p>`
       : `<div class='card p-5 text-center'><h2 class='font-bold'>No lectures yet</h2><p class='mt-1 text-sm text-muted'>Tap the Record button to start your first lecture.</p></div>`;
     return;
   }
-  el.innerHTML = list
-    .map(n => {
-      const stars = n.segments.filter(s => s.mark).length;
-      return `<div class='card relative'>
-        <button data-action='open-lecture' data-id='${n.id}' class='block w-full p-4 pr-14 text-left'>
-          <div class='flex items-center gap-3'>${courseTile(n.course)}<p class='truncate text-sm font-semibold text-muted'>${esc(n.course || 'No course code')}</p></div>
-          <h2 class='mt-3 text-lg font-bold leading-snug'>${esc(n.title)}</h2>
-          <p class='mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted'>
-            <span>${fmtDate(n.createdAt)}</span>
-            <span class='inline-flex items-center gap-1'>${ic('clock', 14)} ${fmtDur(n.duration)}</span>
-          </p>
-          <p class='mt-3 flex gap-2 text-xs font-semibold'>
-            <span class='rounded-full bg-primarysoft px-2.5 py-1 text-primary'>${n.segments.length} ${n.segments.length === 1 ? 'section' : 'sections'}</span>
-            ${stars ? `<span class='rounded-full bg-ambersoft px-2.5 py-1 text-amberink'>${stars} starred</span>` : ''}
-          </p>
+  const groups = new Map<string, Note[]>();
+  for (const n of list) {
+    const k = n.course || '';
+    const g = groups.get(k);
+    if (g) {
+      g.push(n);
+    } else {
+      groups.set(k, [n]);
+    }
+  }
+  const newest = (g: Note[]) => Math.max(...g.map(n => n.createdAt));
+  const keys = Array.from(groups.keys()).sort((a, b) => {
+    if (!a) {
+      return 1;
+    }
+    if (!b) {
+      return -1;
+    }
+    return newest(groups.get(b) as Note[]) - newest(groups.get(a) as Note[]);
+  });
+  const dayMon = (ts: number) =>
+    new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const year = (ts: number) => String(new Date(ts).getFullYear());
+
+  const sections = keys
+    .map(k => {
+      const g = (groups.get(k) as Note[]).sort((a, b) => b.createdAt - a.createdAt);
+      const first = g[g.length - 1].createdAt;
+      const last = g[0].createdAt;
+      const range = g.length === 1 ? fmtDate(last) : fmtDate(first) + ' - ' + fmtDate(last);
+      const closed = !q && collapsedCourses.has(k);
+      const rows = g
+        .map(n => {
+          const stars = n.segments.filter(s => s.mark).length;
+          return `<tr class='lec-row' data-action='open-lecture' data-id='${n.id}'>
+            <td class='lec-date'><span class='block font-semibold tabular-nums'>${dayMon(n.createdAt)}</span><span class='block text-[11px] text-muted'>${year(n.createdAt)}</span></td>
+            <td class='lec-title'><button type='button' data-action='open-lecture' data-id='${n.id}' class='block w-full text-left font-semibold leading-snug'>${hl(n.title, q)}</button><span class='mt-0.5 block text-xs text-muted'>${n.segments.length} ${n.segments.length === 1 ? 'section' : 'sections'}${stars ? ' - ' + stars + ' starred' : ''}</span></td>
+            <td class='lec-dur'>${fmtDur(n.duration)}</td>
+            <td class='lec-more'><button type='button' data-action='lecture-menu' data-id='${n.id}' aria-label='More options for ${esc(n.title)}' class='flex h-9 w-9 items-center justify-center rounded-full text-muted active:bg-surface2'>${ic('more', 18)}</button></td>
+          </tr>`;
+        })
+        .join('');
+      return `<section class='card overflow-hidden ${closed ? 'is-closed' : ''}'>
+        <button type='button' data-action='toggle-course' data-v='${esc(k)}' aria-expanded='${closed ? 'false' : 'true'}' class='flex w-full items-center gap-3 p-4 text-left'>
+          ${courseTile(k)}
+          <span class='min-w-0 flex-1'>
+            <span class='block truncate font-display text-lg font-bold leading-tight'>${hl(k || 'No course code', q)}</span>
+            <span class='block text-xs text-muted'>${g.length} ${g.length === 1 ? 'lecture' : 'lectures'} - ${range}</span>
+          </span>
+          <span class='chev-rot text-muted'>${ic('chev', 18)}</span>
         </button>
-        <button data-action='lecture-menu' data-id='${n.id}' aria-label='More options for ${esc(n.title)}' class='absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full text-muted active:bg-surface2'>${ic('more')}</button>
-      </div>`;
+        <div class='fold'><div class='fold-in'>
+          <table class='lec-table'>
+            <thead><tr><th>Date</th><th>Lecture</th><th class='text-right'>Time</th><th><span class='sr-only'>Options</span></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div></div>
+      </section>`;
     })
     .join('');
+  el.innerHTML = `<p class='px-1 text-xs font-semibold text-muted'>${keys.length} ${keys.length === 1 ? 'course' : 'courses'} - ${list.length} ${list.length === 1 ? 'lecture' : 'lectures'}</p>${sections}`;
 }
 
 function sectionCard(s: Segment, live: boolean): string {
@@ -2292,10 +2567,7 @@ function renderNotes(): void {
         <div><h1 class='font-display text-3xl font-bold'>My notes</h1><p class='mt-1 text-sm text-muted'>Starred sections and typed notes from every lecture.</p></div>
         <button data-action='export-notes' class='iconbtn mt-1' aria-label='Download these notes'>${ic('download', 18)}</button>
       </div>
-      <div class='relative mt-5'>
-        <span class='pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted'>${ic('search', 18)}</span>
-        <input id='notes-search' type='search' value='${esc(notesSearch)}' placeholder='Search your notes' class='field !pl-10' aria-label='Search notes'>
-      </div>
+      ${searchBar('notes')}
       <div class='no-scrollbar mt-3 flex gap-2 overflow-x-auto'>${pill('all', 'All')}${pill('starred', 'Starred')}${pill('typed', 'Typed')}</div>
       <div id='notes-list' class='mt-4 space-y-3'></div>
     </div>`,
@@ -2314,20 +2586,40 @@ function renderNotesList(): void {
     el.innerHTML = `<div class='card p-5 text-center'><h2 class='font-bold'>No notes here yet</h2><p class='mt-1 text-sm text-muted'>Press Mark while recording, star a section, or type a note inside a lecture. It will show up here.</p></div>`;
     return;
   }
-  el.innerHTML = items
-    .map(
-      it => `<div class='card relative'>
+  const q = notesSearch.trim();
+  const groups = new Map<string, { n: Note; s: Segment }[]>();
+  for (const it of items) {
+    const k = it.n.course || '';
+    const g = groups.get(k);
+    if (g) {
+      g.push(it);
+    } else {
+      groups.set(k, [it]);
+    }
+  }
+  const keys = Array.from(groups.keys()).sort((a, b) => (!a ? 1 : !b ? -1 : a < b ? -1 : 1));
+  el.innerHTML = keys
+    .map(k => {
+      const g = groups.get(k) as { n: Note; s: Segment }[];
+      const cards = g
+        .map(
+          it => `<div class='card relative'>
       <button data-action='open-lecture' data-id='${it.n.id}' class='block w-full p-4 pr-14 text-left'>
-        <p class='text-[16px] leading-relaxed'>${esc(it.s.text)}</p>
+        <p class='text-[16px] leading-relaxed'>${hl(it.s.text, q)}</p>
         <p class='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted'>
-          ${it.n.course ? `<span class='font-bold text-primary'>${esc(it.n.course)}</span>` : ''}
-          <span>${esc(it.n.title)}</span><span class='tabular-nums'>${fmtTime(it.s.t)}</span>
+          <span>${esc(it.n.title)}</span><span>${fmtDate(it.n.createdAt)}</span><span class='tabular-nums'>${fmtTime(it.s.t)}</span>
           ${it.s.typed ? `<span class='rounded-full bg-lavsoft px-2 py-0.5 font-semibold text-lavink'>typed</span>` : ''}
         </p>
       </button>
       <button data-action='star-seg' data-id='${it.s.id}' data-nid='${it.n.id}' class='absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full ${it.s.mark ? 'text-amber' : 'text-muted'}' aria-label='${it.s.mark ? 'Remove star' : 'Star this note'}'>${ic('star', 20, it.s.mark)}</button>
     </div>`
-    )
+        )
+        .join('');
+      return `<div class='space-y-3'>
+        <div class='flex items-center gap-3 px-1 pt-2'>${courseTile(k)}<div class='min-w-0 flex-1'><p class='truncate font-display text-lg font-bold leading-tight'>${esc(k || 'No course code')}</p><p class='text-xs text-muted'>${g.length} ${g.length === 1 ? 'note' : 'notes'}</p></div></div>
+        ${cards}
+      </div>`;
+    })
     .join('');
 }
 
@@ -2665,32 +2957,167 @@ function accountSection(): string {
       </section>`;
 }
 
-function renderAuth(): void {
+function authCopy(): { title: string; sub: string } {
+  if (authMode === 'reset') {
+    return {
+      title: 'Reset your password',
+      sub: 'Enter your email and we will send you a link to choose a new one.',
+    };
+  }
+  if (authMode === 'signup') {
+    return {
+      title: 'Create your account',
+      sub: 'Your lectures are saved to your account, so you never lose them and can open them on any phone.',
+    };
+  }
+  return { title: 'Welcome back', sub: 'Sign in to open your lectures and notes.' };
+}
+
+function authFormHtml(): string {
   const signup = authMode === 'signup';
   const reset = authMode === 'reset';
-  const title = reset ? 'Reset password' : signup ? 'Create your account' : 'Welcome back';
-  const sub = reset
-    ? 'Enter your email and we will send you a link to choose a new password.'
+  let n = 0;
+  const item = (html: string) => `<div class='auth-item' style='--i:${n++}'>${html}</div>`;
+  const label = (id: string, text: string) =>
+    `<label for='${id}' class='mb-1.5 block text-sm font-semibold'>${text}</label>`;
+  const parts: string[] = [];
+  if (signup) {
+    parts.push(
+      item(
+        `${label('a-name', 'Name')}<div class='relative'><span class='auth-ico'>${ic('user', 18)}</span><input id='a-name' name='a-name' autocomplete='name' maxlength='60' placeholder='Your name' class='field !pl-11'></div>`
+      )
+    );
+  }
+  parts.push(
+    item(
+      `${label('a-email', 'Email')}<div class='relative'><span class='auth-ico'>${ic('mail', 18)}</span><input id='a-email' name='a-email' type='email' inputmode='email' autocomplete='email' autocapitalize='none' placeholder='you@example.com' class='field !pl-11'></div>`
+    )
+  );
+  if (!reset) {
+    parts.push(
+      item(
+        `${label('a-pass', 'Password')}<div class='relative'><span class='auth-ico'>${ic('lock', 18)}</span><input id='a-pass' name='a-pass' type='password' autocomplete='${signup ? 'new-password' : 'current-password'}' placeholder='${signup ? 'At least 6 characters' : 'Your password'}' class='field !pl-11 !pr-12'><button type='button' data-action='auth-pw-toggle' aria-label='Show password' class='absolute right-1.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-muted'>${ic('eye', 18)}</button></div>${signup ? `<div class='auth-meter'><i id='auth-meter-bar'></i></div><p id='auth-meter-text' class='mt-1.5 text-xs text-muted'>Use 6 or more characters. A mix of letters and numbers is stronger.</p>` : ''}`
+      )
+    );
+  }
+  parts.push(
+    item(
+      `<p id='auth-err' role='alert' class='hidden rounded-xl bg-coralsoft px-3.5 py-2.5 text-sm font-semibold text-coral'></p><p id='auth-ok' role='status' class='hidden rounded-xl bg-primarysoft px-3.5 py-2.5 text-sm font-semibold text-primary'></p>`
+    )
+  );
+  parts.push(
+    item(
+      `<button id='auth-submit' type='submit' class='btn-primary auth-btn w-full'><span class='auth-btn-label'>${reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}</span><span class='auth-spin' aria-hidden='true'></span></button>`
+    )
+  );
+  const link = reset
+    ? `<button type='button' data-action='auth-mode' data-v='signin' class='w-full py-2 text-center text-sm font-semibold text-muted'>Back to sign in</button>`
     : signup
-      ? 'Your lectures and notes are saved to your account, so you never lose them and can open them on any phone.'
-      : 'Sign in to open your lectures and notes.';
-  const tab = (mode: string, label: string) =>
-    `<button type='button' data-action='auth-mode' data-v='${mode}' class='flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${authMode === mode ? 'bg-primary text-onprimary' : 'text-muted'}'>${label}</button>`;
-  root.innerHTML = `<div class='pt-safe-6 mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 pb-10'>
-    <p class='font-display text-3xl font-bold'>LectureScribe</p>
-    <h1 class='mt-6 font-display text-2xl font-bold'>${title}</h1>
-    <p class='mt-1 text-sm text-muted'>${sub}</p>
-    ${reset ? '' : `<div class='mt-5 flex gap-1 rounded-2xl border border-line bg-bg p-1'>${tab('signin', 'Sign in')}${tab('signup', 'Create account')}</div>`}
-    <form id='auth-form' class='mt-5 space-y-3' novalidate>
-      ${signup ? `<div><label for='a-name' class='mb-1 block text-sm font-semibold'>Name</label><input id='a-name' name='a-name' autocomplete='name' maxlength='60' placeholder='Your name' class='field'></div>` : ''}
-      <div><label for='a-email' class='mb-1 block text-sm font-semibold'>Email</label><input id='a-email' name='a-email' type='email' inputmode='email' autocomplete='email' autocapitalize='none' placeholder='you@example.com' class='field'></div>
-      ${reset ? '' : `<div><label for='a-pass' class='mb-1 block text-sm font-semibold'>Password</label><div class='relative'><input id='a-pass' name='a-pass' type='password' autocomplete='${signup ? 'new-password' : 'current-password'}' placeholder='${signup ? 'At least 6 characters' : 'Your password'}' class='field pr-16'><button type='button' data-action='auth-pw-toggle' class='absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted'>Show</button></div></div>`}
-      <p id='auth-err' role='alert' class='hidden rounded-xl bg-coralsoft px-3 py-2 text-sm font-semibold text-coral'></p>
-      <p id='auth-ok' role='status' class='hidden rounded-xl bg-primarysoft px-3 py-2 text-sm font-semibold text-primary'></p>
-      <button id='auth-submit' type='submit' class='btn-primary w-full'>${reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}</button>
-    </form>
-    ${reset ? `<button type='button' data-action='auth-mode' data-v='signin' class='mt-4 w-full text-center text-sm font-semibold text-muted'>Back to sign in</button>` : !signup ? `<button type='button' data-action='auth-mode' data-v='reset' class='mt-4 w-full text-center text-sm font-semibold text-muted'>Forgot your password?</button>` : ''}
+      ? `<p class='text-center text-xs text-muted'>Your lectures are private to your account.</p>`
+      : `<button type='button' data-action='auth-mode' data-v='reset' class='w-full py-2 text-center text-sm font-semibold text-muted'>Forgot your password?</button>`;
+  parts.push(item(link));
+  return `<form id='auth-form' class='space-y-4' novalidate>${parts.join('')}</form>`;
+}
+
+function renderAuth(): void {
+  const c = authCopy();
+  const tab = (mode: string, text: string) =>
+    `<button type='button' data-action='auth-mode' data-v='${mode}' class='relative z-10 flex-1 py-2.5 text-sm font-semibold'>${text}</button>`;
+  root.innerHTML = `<div id='auth-frame' class='flex min-h-screen flex-col'>
+    <div class='aurora relative overflow-hidden px-6 pb-20 pt-safe-6 text-white'>
+      <span class='auth-blob b1'></span><span class='auth-blob b2'></span><span class='auth-blob b3'></span>
+      <div class='relative mx-auto max-w-md'>
+        <div class='auth-rise flex items-center gap-3' style='--i:0'>
+          <img src='./icon-192.png' alt='' width='48' height='48' class='h-12 w-12 rounded-2xl bg-white object-cover shadow-lg'>
+          <p class='font-display text-xl font-bold'>LectureScribe</p>
+        </div>
+        <h1 id='auth-title' class='auth-rise mt-8 font-display text-[1.75rem] font-bold leading-tight' style='--i:1'>${c.title}</h1>
+        <p id='auth-sub' class='auth-rise mt-2 text-[15px] leading-relaxed text-white/75' style='--i:2'>${c.sub}</p>
+      </div>
+    </div>
+    <div class='auth-sheet relative -mt-10 flex-1 rounded-t-[2rem] bg-bg px-6 pb-10 pt-6'>
+      <div class='mx-auto max-w-md'>
+        <div id='auth-tabs-wrap' class='fold ${authMode === 'reset' ? 'closed' : ''}'>
+          <div class='fold-in'>
+            <div id='auth-tabs' data-mode='${authMode === 'signup' ? 'signup' : 'signin'}' class='auth-tabs relative flex rounded-2xl border border-line bg-surface p-1'>
+              <span class='auth-ind'></span>${tab('signin', 'Sign in')}${tab('signup', 'Create account')}
+            </div>
+          </div>
+        </div>
+        <div id='auth-card' class='mt-5'>${authFormHtml()}</div>
+      </div>
+    </div>
   </div>`;
+}
+
+function updateAuthMode(): void {
+  if (!document.getElementById('auth-frame')) {
+    renderAuth();
+    return;
+  }
+  const prev = document.getElementById('a-email') as HTMLInputElement | null;
+  const email = prev ? prev.value : '';
+  const tabs = document.getElementById('auth-tabs');
+  if (tabs) {
+    tabs.dataset.mode = authMode === 'signup' ? 'signup' : 'signin';
+  }
+  const wrap = document.getElementById('auth-tabs-wrap');
+  if (wrap) {
+    wrap.classList.toggle('closed', authMode === 'reset');
+  }
+  const c = authCopy();
+  for (const [id, text] of [
+    ['auth-title', c.title],
+    ['auth-sub', c.sub],
+  ]) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = text;
+      el.classList.remove('auth-swap');
+      void el.offsetWidth;
+      el.classList.add('auth-swap');
+    }
+  }
+  const card = document.getElementById('auth-card');
+  if (card) {
+    card.innerHTML = authFormHtml();
+    const e = document.getElementById('a-email') as HTMLInputElement | null;
+    if (e && email) {
+      e.value = email;
+    }
+  }
+}
+
+function updateMeter(pw: string): void {
+  const bar = document.getElementById('auth-meter-bar') as HTMLElement | null;
+  const txt = document.getElementById('auth-meter-text');
+  if (!bar || !txt) {
+    return;
+  }
+  let score = 0;
+  if (pw.length >= 6) {
+    score++;
+  }
+  if (pw.length >= 10) {
+    score++;
+  }
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw) && /\d/.test(pw)) {
+    score++;
+  }
+  if (/[^A-Za-z0-9]/.test(pw)) {
+    score++;
+  }
+  const levels = [
+    ['4%', 'rgb(var(--c-coral))', 'Use 6 or more characters. A mix of letters and numbers is stronger.'],
+    ['30%', 'rgb(var(--c-coral))', 'Weak. Add more characters.'],
+    ['58%', 'rgb(var(--c-amber))', 'Okay. Add numbers or capital letters.'],
+    ['82%', 'rgb(var(--c-teal))', 'Good password.'],
+    ['100%', 'rgb(var(--c-teal))', 'Strong password.'],
+  ];
+  const lv = pw.length === 0 ? levels[0] : levels[Math.max(1, score)];
+  bar.style.width = lv[0];
+  bar.style.background = lv[1];
+  txt.textContent = lv[2];
 }
 
 async function submitAuth(): Promise<void> {
@@ -2705,31 +3132,44 @@ async function submitAuth(): Promise<void> {
   const err = document.getElementById('auth-err');
   const ok = document.getElementById('auth-ok');
   const btn = document.getElementById('auth-submit') as HTMLButtonElement | null;
+  const form = document.getElementById('auth-form');
   const say = (el: HTMLElement | null, msg: string) => {
     if (el) {
       el.textContent = msg;
       el.classList.toggle('hidden', !msg);
+      if (msg) {
+        el.classList.remove('auth-swap');
+        void el.offsetWidth;
+        el.classList.add('auth-swap');
+      }
+    }
+  };
+  const fail = (msg: string) => {
+    say(err, msg);
+    if (form) {
+      form.classList.remove('shake');
+      void (form as HTMLElement).offsetWidth;
+      form.classList.add('shake');
     }
   };
   say(err, '');
   say(ok, '');
   if (!email) {
-    say(err, 'Enter your email address.');
+    fail('Enter your email address.');
     return;
   }
   if (authMode !== 'reset' && !pass) {
-    say(err, 'Enter your password.');
+    fail('Enter your password.');
     return;
   }
   if (authMode === 'signup' && pass.length < 6) {
-    say(err, 'Choose a password with at least 6 characters.');
+    fail('Choose a password with at least 6 characters.');
     return;
   }
   authBusy = true;
-  const label = btn ? btn.textContent : '';
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Please wait...';
+    btn.classList.add('is-busy');
   }
   try {
     if (authMode === 'reset') {
@@ -2743,12 +3183,12 @@ async function submitAuth(): Promise<void> {
     }
   } catch (e) {
     pendingName = '';
-    say(err, cloud.friendlyAuthError(e));
+    fail(cloud.friendlyAuthError(e));
   } finally {
     authBusy = false;
     if (btn) {
       btn.disabled = false;
-      btn.textContent = label;
+      btn.classList.remove('is-busy');
     }
   }
 }
@@ -3146,16 +3586,76 @@ function handleAction(action: string, el: HTMLElement): void {
           <button data-action='confirm-wipe' class='btn-danger flex-1'>Delete all</button>
         </div>`);
       break;
-    case 'auth-mode':
-      authMode = v === 'signup' ? 'signup' : v === 'reset' ? 'reset' : 'signin';
-      renderAuth();
+    case 'auth-mode': {
+      const next = v === 'signup' ? 'signup' : v === 'reset' ? 'reset' : 'signin';
+      if (next !== authMode) {
+        authMode = next;
+        updateAuthMode();
+      }
       break;
+    }
     case 'auth-pw-toggle': {
       const pw = document.getElementById('a-pass') as HTMLInputElement | null;
       if (pw) {
         pw.type = pw.type === 'password' ? 'text' : 'password';
-        el.textContent = pw.type === 'password' ? 'Show' : 'Hide';
+        el.innerHTML = ic(pw.type === 'password' ? 'eye' : 'eyeoff', 18);
+        el.setAttribute('aria-label', pw.type === 'password' ? 'Show password' : 'Hide password');
       }
+      break;
+    }
+    case 'toggle-course': {
+      const sec = el.closest('section');
+      if (sec) {
+        const closed = !sec.classList.contains('is-closed');
+        sec.classList.toggle('is-closed', closed);
+        el.setAttribute('aria-expanded', closed ? 'false' : 'true');
+        if (closed) {
+          collapsedCourses.add(v);
+        } else {
+          collapsedCourses.delete(v);
+        }
+      }
+      break;
+    }
+    case 'search-pick': {
+      const sc = (el.dataset.scope === 'notes' ? 'notes' : 'lectures') as SearchScope;
+      setQ(sc, v);
+      const inp = document.getElementById(SEARCH_CFG[sc].input) as HTMLInputElement | null;
+      if (inp) {
+        inp.value = v;
+        inp.blur();
+      }
+      addRecent(v);
+      syncClear(sc);
+      runSearch(sc);
+      hideHelper(sc);
+      break;
+    }
+    case 'search-open': {
+      const sc = (el.dataset.scope === 'notes' ? 'notes' : 'lectures') as SearchScope;
+      addRecent(getQ(sc));
+      hideHelper(sc);
+      go('lecture/' + id);
+      break;
+    }
+    case 'search-clear': {
+      const sc = (el.dataset.scope === 'notes' ? 'notes' : 'lectures') as SearchScope;
+      setQ(sc, '');
+      const inp = document.getElementById(SEARCH_CFG[sc].input) as HTMLInputElement | null;
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      syncClear(sc);
+      runSearch(sc);
+      showHelper(sc);
+      break;
+    }
+    case 'recent-clear': {
+      const sc = (el.dataset.scope === 'notes' ? 'notes' : 'lectures') as SearchScope;
+      recentSearches = [];
+      saveRecent();
+      showHelper(sc);
       break;
     }
     case 'sign-out':
@@ -3246,12 +3746,14 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('input', e => {
   const t = e.target as HTMLInputElement;
-  if (t.id === 'search') {
-    search = t.value;
-    renderLectureList();
-  } else if (t.id === 'notes-search') {
-    notesSearch = t.value;
-    renderNotesList();
+  if (t.id === 'search' || t.id === 'notes-search') {
+    const sc: SearchScope = t.id === 'search' ? 'lectures' : 'notes';
+    setQ(sc, t.value);
+    syncClear(sc);
+    runSearch(sc);
+    showHelper(sc);
+  } else if (t.id === 'a-pass' && authMode === 'signup') {
+    updateMeter(t.value);
   } else if (t.id === 'title' || t.id === 'course') {
     const n = viewNote();
     if (n) {
@@ -3290,6 +3792,34 @@ document.addEventListener('focusin', e => {
   const t = e.target as HTMLElement;
   if (t.classList && t.classList.contains('seg-text')) {
     editingSegment = true;
+  }
+  if (t.id === 'search' || t.id === 'notes-search') {
+    showHelper(t.id === 'search' ? 'lectures' : 'notes');
+  }
+});
+
+document.addEventListener('focusout', e => {
+  const t = e.target as HTMLElement;
+  if (t.id === 'search' || t.id === 'notes-search') {
+    const sc: SearchScope = t.id === 'search' ? 'lectures' : 'notes';
+    window.setTimeout(() => hideHelper(sc), 220);
+  }
+});
+
+document.addEventListener('keydown', e => {
+  const t = e.target as HTMLInputElement;
+  if (t.id !== 'search' && t.id !== 'notes-search') {
+    return;
+  }
+  const sc: SearchScope = t.id === 'search' ? 'lectures' : 'notes';
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addRecent(t.value);
+    hideHelper(sc);
+    t.blur();
+  } else if (e.key === 'Escape') {
+    hideHelper(sc);
+    t.blur();
   }
 });
 
