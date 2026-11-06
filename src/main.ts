@@ -56,6 +56,11 @@ const NATIVE_PLUGIN: any =
     ? CAP.Plugins.SpeechRecognition
     : null;
 const IS_NATIVE = !!NATIVE_PLUGIN;
+if (IS_NATIVE) {
+  /* Safety net: if the phone does not report the status bar height to the page,
+     still keep content clear of the clock and notification icons. */
+  document.documentElement.style.setProperty('--top-min', '2rem');
+}
 
 /* Looks like the browser's SpeechRecognition so the recording code does not change. */
 class NativeRecognition {
@@ -2000,10 +2005,10 @@ function renderHome(): void {
     `<div class='card p-3.5'><p class='text-xs font-semibold text-muted'>${label}</p><p class='mt-1 font-display text-2xl font-bold'>${value}</p></div>`;
   root.innerHTML = shell(
     `<div class='pb-32'>
-      <div class='aurora px-5 pb-24 pt-6 text-white'>
+      <div class='aurora px-5 pb-24 pt-safe-6 text-white'>
         <div class='mx-auto flex max-w-xl items-center justify-between'>
           <div class='flex items-center gap-3'>
-            <img src='/resources/icon-192.png' alt='LectureScribe logo' width='44' height='44' class='h-11 w-11 shrink-0 rounded-2xl bg-white object-cover'>
+            <img src='./icon-192.png' alt='LectureScribe logo' width='44' height='44' class='h-11 w-11 shrink-0 rounded-2xl bg-white object-cover'>
             <div><p class='font-display text-lg font-bold leading-tight'>LectureScribe</p><p class='text-sm text-white/75'>${greeting()}</p></div>
           </div>
           <button data-action='nav' data-to='profile' aria-label='Open profile' class='rounded-full ring-2 ring-white/30'>${avatar('h-11 w-11')}</button>
@@ -2062,7 +2067,7 @@ function renderLectures(): void {
   const pill = (v: string, label: string) =>
     `<button data-action='set-time' data-v='${v}' class='pill ${timeFilter === v ? 'pill-on' : ''}'>${label}</button>`;
   root.innerHTML = shell(
-    `<div class='mx-auto max-w-xl px-5 pb-32 pt-6'>
+    `<div class='mx-auto max-w-xl px-5 pb-32 pt-safe-6'>
       <h1 class='font-display text-3xl font-bold'>My lectures</h1>
       <p class='mt-1 text-sm text-muted'>All your recorded lectures in one place.</p>
       <div class='relative mt-5'>
@@ -2205,7 +2210,7 @@ function renderDetail(): void {
   const tab = (v: string, label: string) =>
     `<button data-action='set-tab' data-v='${v}' class='flex-1 border-b-2 px-2 py-3 text-sm font-bold ${detailTab === v ? 'border-primary text-ink' : 'border-transparent text-muted'}'>${label}</button>`;
   root.innerHTML = shell(
-    `<div class='mx-auto max-w-xl px-5 pb-16 pt-5'>
+    `<div class='mx-auto max-w-xl px-5 pb-16 pt-safe-5'>
       <div class='flex items-center justify-between'>
         <button data-action='nav' data-to='lectures' class='iconbtn' aria-label='Back to lectures'>${ic('back')}</button>
         <h1 class='font-display text-lg font-bold'>Lecture details</h1>
@@ -2282,7 +2287,7 @@ function renderNotes(): void {
   const pill = (v: string, label: string) =>
     `<button data-action='set-notes-filter' data-v='${v}' class='pill ${notesFilter === v ? 'pill-on' : ''}'>${label}</button>`;
   root.innerHTML = shell(
-    `<div class='mx-auto max-w-xl px-5 pb-32 pt-6'>
+    `<div class='mx-auto max-w-xl px-5 pb-32 pt-safe-6'>
       <div class='flex items-start justify-between gap-3'>
         <div><h1 class='font-display text-3xl font-bold'>My notes</h1><p class='mt-1 text-sm text-muted'>Starred sections and typed notes from every lecture.</p></div>
         <button data-action='export-notes' class='iconbtn mt-1' aria-label='Download these notes'>${ic('download', 18)}</button>
@@ -2344,7 +2349,7 @@ function renderProfile(): void {
   const link = (action: string, icon: string, label: string) =>
     `<button data-action='${action}' class='flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left font-semibold last:border-b-0'><span class='flex h-9 w-9 items-center justify-center rounded-xl bg-lavsoft text-lavink'>${ic(icon, 18)}</span><span class='flex-1'>${label}</span><span class='text-muted'>${ic('chev', 18)}</span></button>`;
   root.innerHTML = shell(
-    `<div class='mx-auto max-w-xl px-5 pb-32 pt-6'>
+    `<div class='mx-auto max-w-xl px-5 pb-32 pt-safe-6'>
       <h1 class='font-display text-3xl font-bold'>Profile</h1>
       <p class='mt-1 text-sm text-muted'>Manage your details and preferences. Your lectures are saved to your account and kept on this phone for offline use.</p>
       <section class='card mt-5 flex items-center gap-4 p-4'>
@@ -2396,7 +2401,7 @@ function renderLive(): void {
   }
   const ctl = (label: string, btn: string) =>
     `<div class='flex flex-col items-center gap-1.5'>${btn}<span class='text-xs font-semibold text-muted'>${label}</span></div>`;
-  root.innerHTML = `<div class='h-screen-safe mx-auto flex max-w-xl flex-col px-4 pb-3 pt-4'>
+  root.innerHTML = `<div class='h-screen-safe mx-auto flex max-w-xl flex-col px-4 pb-3 pt-safe-4'>
       <div class='flex items-center justify-between'>
         <button data-action='nav' data-to='home' class='iconbtn' aria-label='Back to home'>${ic('back')}</button>
         <h1 class='font-display text-lg font-bold'>Live lecture</h1>
@@ -2671,7 +2676,7 @@ function renderAuth(): void {
       : 'Sign in to open your lectures and notes.';
   const tab = (mode: string, label: string) =>
     `<button type='button' data-action='auth-mode' data-v='${mode}' class='flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${authMode === mode ? 'bg-primary text-onprimary' : 'text-muted'}'>${label}</button>`;
-  root.innerHTML = `<div class='mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10'>
+  root.innerHTML = `<div class='pt-safe-6 mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 pb-10'>
     <p class='font-display text-3xl font-bold'>LectureScribe</p>
     <h1 class='mt-6 font-display text-2xl font-bold'>${title}</h1>
     <p class='mt-1 text-sm text-muted'>${sub}</p>

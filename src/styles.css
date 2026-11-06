@@ -333,3 +333,35 @@ button:active {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Keeps screens clear of the phone's status bar (clock, battery, notifications).
+   --st is the status bar height; each class adds its normal top spacing to it. */
+:root {
+  --top-min: 0px;
+  --st: 0px;
+}
+
+@supports (padding-top: max(1px, 2px)) {
+  :root {
+    --st: max(
+      env(safe-area-inset-top, 0px),
+      var(--safe-area-inset-top, 0px),
+      var(--top-min)
+    );
+  }
+}
+
+.pt-safe-4 {
+  padding-top: 1rem;
+  padding-top: calc(var(--st) + 1rem);
+}
+
+.pt-safe-5 {
+  padding-top: 1.25rem;
+  padding-top: calc(var(--st) + 1.25rem);
+}
+
+.pt-safe-6 {
+  padding-top: 1.5rem;
+  padding-top: calc(var(--st) + 1.5rem);
+}

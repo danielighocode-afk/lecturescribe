@@ -10,8 +10,14 @@
   "theme_color": "#1B0F40",
   "icons": [
     {
-      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAASFBMVEX///////7+//7//v/+/v/+/v7+/vz9/v79/P77+/z38vzo3PrazPHOuvDInfqnmdmZd9qsXPlnWLRwNdtiC/YuJYkcCYIPAII4+GkTAAAByElEQVR42p2TjZLdIAiF8eZmV0UQMer7v2nBtHd/pu1Me5LJTOQT9IgA/6JnjM+/hOPp30c8vo2ft2ICKI3RkXi+9AtIHpbL1ChDeE/xKxABSOe8tnrDI4SvgIWXabqGMUL4GUiww2uMMadza/QO8QN4e1a1wdZt7tyZlHLcepWAoq1d3TTWUhSBGFxxAzHaJo7WkLtq1UUgHbAwlxw2YOSZkCN7gVkqpXFlLNSuZrYcMWLBHOIjtz7mGBVS0l5sMPDVLEMI3FrjnDLLWKqULFtzPw5yIBM50FqODgwl4G6/IhzlInPwujbAjD+Byg1tBYy4FE5AA4zo1El0AyrGMgvWgWZE7DfAyn37SWMDQlALuA+y6gZkoJk0a53M1Oy1PcaHAXUJiy2ijEG12qnVRpbhMuPRjxnKvA9K0F2Yo/KFOcsqySxxII+hpjklF50VzZ1MrS9xzx1IJUNGSHVQ1kGFbcfWWNYBetyn6b2Ibydk8WKK5mIrGSsd5wZizJ1CSimL2iMeDiGdsFvGS4Bt8G7wIrZ0sbB1yntK5wtYQ8RsnO5j8pzf2j6rFx9aS/IJn8IbcNkK0n27fnv3njd33j36h2v7hP/VD1PXJkrVNwuFAAAAAElFTkSuQmCC",
-      "sizes": "32x32",
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     }
