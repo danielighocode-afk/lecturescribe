@@ -1,4 +1,5 @@
 import './styles.css';
+import * as cloud from './cloud';
 
 interface Segment {
   id: string;
@@ -298,6 +299,16 @@ let profile: Profile = Object.assign(
 );
 
 let route: Route = { view: 'home', id: '' };
+
+/* accounts */
+type AuthState = 'loading' | 'out' | 'in';
+let authState: AuthState = 'loading';
+let account: { uid: string; email: string; name: string } | null = null;
+let authMode: 'signin' | 'signup' | 'reset' = 'signin';
+let authBusy = false;
+let cloudOn = false;
+let syncLabel = '';
+let pendingName = '';
 let search = '';
 let timeFilter: 'all' | 'recent' | 'week' | 'month' = 'all';
 let courseFilter = '';
@@ -446,6 +457,9 @@ function saveNotes(): void {
   } catch {
     toast('Could not save. Storage is full or blocked. Export your notes.');
   }
+  if (cloudOn) {
+    cloud.requestPush();
+  }
 }
 
 function saveSettings(): void {
@@ -456,11 +470,14 @@ function saveSettings(): void {
   }
 }
 
-function saveProfile(): void {
+function saveProfile(push = true): void {
   try {
     localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   } catch {
     toast('Could not save your profile. Storage is full or blocked.');
+  }
+  if (push && cloudOn) {
+    cloud.pushProfile();
   }
 }
 
@@ -1595,6 +1612,17 @@ function go(path: string): void {
 }
 
 function render(): void {
+  if (authState !== 'in') {
+    closeModal();
+    hideTip();
+    stopWaveLoop();
+    if (authState === 'loading') {
+      root.innerHTML = `<div class='flex min-h-screen items-center justify-center'><p class='font-display text-xl font-bold text-muted'>LectureScribe</p></div>`;
+    } else {
+      renderAuth();
+    }
+    return;
+  }
   closeModal();
   hideTip();
   stopWaveLoop();
@@ -2318,7 +2346,7 @@ function renderProfile(): void {
   root.innerHTML = shell(
     `<div class='mx-auto max-w-xl px-5 pb-32 pt-6'>
       <h1 class='font-display text-3xl font-bold'>Profile</h1>
-      <p class='mt-1 text-sm text-muted'>Manage your details and preferences. Everything stays on this phone.</p>
+      <p class='mt-1 text-sm text-muted'>Manage your details and preferences. Your lectures are saved to your account and kept on this phone for offline use.</p>
       <section class='card mt-5 flex items-center gap-4 p-4'>
         ${avatar('h-16 w-16')}
         <div class='min-w-0 flex-1'>
@@ -2331,6 +2359,7 @@ function renderProfile(): void {
       <section class='card mt-4'>
         ${row('University', profile.university)}${row('Faculty', profile.faculty)}${row('Department', profile.department)}${row('Current level', profile.level)}
       </section>
+      ${accountSection()}
       <h2 class='mt-7 font-display text-lg font-bold'>Preferences</h2>
       <section class='card mt-3 divide-y divide-line'>
         <div class='px-4 py-3.5'>
@@ -2525,7 +2554,7 @@ function openAbout(): void {
     <h2 class='font-display text-xl font-bold'>About LectureScribe</h2>
     <p class='mt-2 text-sm text-muted'>LectureScribe turns what your lecturer says into notes while you listen, so you can follow along even when you cannot hear every word.</p>
     <ul class='mt-3 list-disc space-y-1.5 pl-5 text-sm text-muted'>
-      <li>Your lectures and profile are stored only on this phone. Clearing your browser data removes them, so download lectures you want to keep.</li>
+      <li>Your lectures and profile are saved to your account and kept on this phone, so they work offline and sync when you are back online. Download lectures you want a copy of.</li>
       <li>Transcription uses your browser's speech engine. It works best in Chrome or Edge with an internet connection.</li>
       <li>Speech engines can mishear technical terms and spoken equations. Check sections marked <b>check</b>.</li>
     </ul>
@@ -2583,6 +2612,294 @@ function readPhoto(file: File): void {
     img.src = String(reader.result);
   };
   reader.readAsDataURL(file);
+}
+
+/* ---------- accounts ---------- */
+
+const EMPTY_PROFILE: Profile = {
+  name: '',
+  university: '',
+  faculty: '',
+  department: '',
+  level: '',
+  photo: '',
+};
+
+function wipeLocalData(): void {
+  /* Used when someone signs out: their lectures live in their account, and the
+     next person to use this phone must not see them. Nothing here touches the
+     account itself. */
+  notes = [];
+  recId = null;
+  profile = Object.assign({}, EMPTY_PROFILE);
+  try {
+    localStorage.removeItem(NOTES_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+  } catch {
+    /* ignore */
+  }
+  cloud.clearLocalSyncState();
+}
+
+function syncText(): string {
+  if (!cloudOn) {
+    return 'Account sync is unavailable.';
+  }
+  return syncLabel || 'Checking your account...';
+}
+
+function accountSection(): string {
+  if (!account) {
+    return '';
+  }
+  return `<h2 class='mt-7 font-display text-lg font-bold'>Account</h2>
+      <section class='card mt-3'>
+        <div class='flex items-center justify-between gap-4 border-b border-line px-4 py-3'><span class='text-sm font-semibold text-muted'>Signed in as</span><span class='min-w-0 truncate text-right font-semibold'>${esc(account.email)}</span></div>
+        <div class='border-b border-line px-4 py-3'><span id='sync-row' class='text-sm text-muted'>${esc(syncText())}</span></div>
+        <button data-action='sign-out' class='flex w-full items-center gap-3 px-4 py-3.5 text-left font-semibold'><span class='flex h-9 w-9 items-center justify-center rounded-xl bg-lavsoft text-lavink'>${ic('user', 18)}</span><span class='flex-1'>Sign out</span><span class='text-muted'>${ic('chev', 18)}</span></button>
+      </section>`;
+}
+
+function renderAuth(): void {
+  const signup = authMode === 'signup';
+  const reset = authMode === 'reset';
+  const title = reset ? 'Reset password' : signup ? 'Create your account' : 'Welcome back';
+  const sub = reset
+    ? 'Enter your email and we will send you a link to choose a new password.'
+    : signup
+      ? 'Your lectures and notes are saved to your account, so you never lose them and can open them on any phone.'
+      : 'Sign in to open your lectures and notes.';
+  const tab = (mode: string, label: string) =>
+    `<button type='button' data-action='auth-mode' data-v='${mode}' class='flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${authMode === mode ? 'bg-primary text-onprimary' : 'text-muted'}'>${label}</button>`;
+  root.innerHTML = `<div class='mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10'>
+    <p class='font-display text-3xl font-bold'>LectureScribe</p>
+    <h1 class='mt-6 font-display text-2xl font-bold'>${title}</h1>
+    <p class='mt-1 text-sm text-muted'>${sub}</p>
+    ${reset ? '' : `<div class='mt-5 flex gap-1 rounded-2xl border border-line bg-bg p-1'>${tab('signin', 'Sign in')}${tab('signup', 'Create account')}</div>`}
+    <form id='auth-form' class='mt-5 space-y-3' novalidate>
+      ${signup ? `<div><label for='a-name' class='mb-1 block text-sm font-semibold'>Name</label><input id='a-name' name='a-name' autocomplete='name' maxlength='60' placeholder='Your name' class='field'></div>` : ''}
+      <div><label for='a-email' class='mb-1 block text-sm font-semibold'>Email</label><input id='a-email' name='a-email' type='email' inputmode='email' autocomplete='email' autocapitalize='none' placeholder='you@example.com' class='field'></div>
+      ${reset ? '' : `<div><label for='a-pass' class='mb-1 block text-sm font-semibold'>Password</label><div class='relative'><input id='a-pass' name='a-pass' type='password' autocomplete='${signup ? 'new-password' : 'current-password'}' placeholder='${signup ? 'At least 6 characters' : 'Your password'}' class='field pr-16'><button type='button' data-action='auth-pw-toggle' class='absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted'>Show</button></div></div>`}
+      <p id='auth-err' role='alert' class='hidden rounded-xl bg-coralsoft px-3 py-2 text-sm font-semibold text-coral'></p>
+      <p id='auth-ok' role='status' class='hidden rounded-xl bg-primarysoft px-3 py-2 text-sm font-semibold text-primary'></p>
+      <button id='auth-submit' type='submit' class='btn-primary w-full'>${reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in'}</button>
+    </form>
+    ${reset ? `<button type='button' data-action='auth-mode' data-v='signin' class='mt-4 w-full text-center text-sm font-semibold text-muted'>Back to sign in</button>` : !signup ? `<button type='button' data-action='auth-mode' data-v='reset' class='mt-4 w-full text-center text-sm font-semibold text-muted'>Forgot your password?</button>` : ''}
+  </div>`;
+}
+
+async function submitAuth(): Promise<void> {
+  if (authBusy) {
+    return;
+  }
+  const val = (id: string) =>
+    ((document.getElementById(id) as HTMLInputElement | null) || { value: '' }).value;
+  const email = val('a-email').trim();
+  const pass = val('a-pass');
+  const name = val('a-name').trim();
+  const err = document.getElementById('auth-err');
+  const ok = document.getElementById('auth-ok');
+  const btn = document.getElementById('auth-submit') as HTMLButtonElement | null;
+  const say = (el: HTMLElement | null, msg: string) => {
+    if (el) {
+      el.textContent = msg;
+      el.classList.toggle('hidden', !msg);
+    }
+  };
+  say(err, '');
+  say(ok, '');
+  if (!email) {
+    say(err, 'Enter your email address.');
+    return;
+  }
+  if (authMode !== 'reset' && !pass) {
+    say(err, 'Enter your password.');
+    return;
+  }
+  if (authMode === 'signup' && pass.length < 6) {
+    say(err, 'Choose a password with at least 6 characters.');
+    return;
+  }
+  authBusy = true;
+  const label = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Please wait...';
+  }
+  try {
+    if (authMode === 'reset') {
+      await cloud.resetPassword(email);
+      say(ok, 'If an account exists for that email, a reset link is on its way. Check your inbox and spam.');
+    } else if (authMode === 'signup') {
+      pendingName = name;
+      await cloud.signUp(email, pass);
+    } else {
+      await cloud.signIn(email, pass);
+    }
+  } catch (e) {
+    pendingName = '';
+    say(err, cloud.friendlyAuthError(e));
+  } finally {
+    authBusy = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+}
+
+function openSignOut(): void {
+  const n = cloud.unsyncedCount();
+  openModal(`
+    <h2 class='font-display text-xl font-bold'>Sign out?</h2>
+    <p class='mt-2 text-sm text-muted'>Your lectures stay safe in your account. They are removed from this phone and come back when you sign in again.</p>
+    ${n > 0 ? `<p class='mt-3 rounded-xl bg-ambersoft p-3 text-sm text-amberink'>Some changes have not uploaded yet. Stay online for a moment first, or they will be lost.</p>` : ''}
+    <div class='mt-5 flex gap-2'>
+      <button data-action='close-modal' class='btn-ghost flex-1'>Cancel</button>
+      <button data-action='confirm-sign-out' class='btn-danger flex-1'>Sign out</button>
+    </div>`);
+}
+
+async function doSignOut(force: boolean): Promise<void> {
+  if (recording) {
+    stopRecording();
+  }
+  if (!force) {
+    toast('Saving your lectures...');
+    const saved = await cloud.flushPending(6000);
+    if (!saved) {
+      openModal(`
+        <h2 class='font-display text-xl font-bold'>Not fully uploaded</h2>
+        <p class='mt-2 text-sm text-muted'>Some lectures have not reached your account yet, probably because there is no internet. If you sign out now they will be lost. Connect to the internet and try again to keep them.</p>
+        <div class='mt-5 flex gap-2'>
+          <button data-action='close-modal' class='btn-primary flex-1'>Stay signed in</button>
+          <button data-action='force-sign-out' class='btn-danger flex-1'>Sign out anyway</button>
+        </div>`);
+      return;
+    }
+  }
+  try {
+    await cloud.signOutUser();
+  } catch {
+    toast('Could not sign out. Try again.');
+    return;
+  }
+  wipeLocalData();
+  closeModal();
+  authMode = 'signin';
+  if (location.hash) {
+    location.hash = '';
+  }
+  if (authState === 'in') {
+    authState = 'out';
+    account = null;
+    render();
+  }
+}
+
+function afterRemoteNotes(): void {
+  if (document.getElementById('modal-root')) {
+    return;
+  }
+  const ae = document.activeElement as HTMLElement | null;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
+    return;
+  }
+  if (route.view === 'detail' || route.view === 'live') {
+    if (!notes.some(n => n.id === route.id)) {
+      go('lectures');
+    } else if (route.view === 'detail') {
+      renderDetailBody();
+    }
+    return;
+  }
+  if (route.view === 'lectures') {
+    renderLectureList();
+  } else if (route.view === 'notes') {
+    renderNotesList();
+  } else {
+    render();
+  }
+}
+
+function initAccounts(): void {
+  try {
+    cloud.initCloud({
+      onUser(user) {
+        if (user) {
+          const owner = cloud.syncOwner();
+          if (owner && owner !== user.uid) {
+            wipeLocalData();
+          }
+          account = user;
+          if (pendingName && !profile.name) {
+            profile.name = pendingName;
+            saveProfile(false);
+          }
+          pendingName = '';
+          authState = 'in';
+        } else {
+          account = null;
+          authState = 'out';
+        }
+        render();
+      },
+      onRemoteNotes(upsert, removeIds) {
+        for (const r of upsert) {
+          const i = notes.findIndex(n => n.id === r.id);
+          if (i >= 0) {
+            notes[i] = r as Note;
+          } else {
+            notes.push(r as Note);
+          }
+        }
+        if (removeIds.length) {
+          notes = notes.filter(n => removeIds.indexOf(n.id) < 0);
+        }
+        saveNotes();
+        afterRemoteNotes();
+      },
+      onRemoteProfile(p) {
+        profile = Object.assign({}, EMPTY_PROFILE, p);
+        saveProfile(false);
+        if (route.view === 'profile' && !document.getElementById('modal-root')) {
+          renderProfile();
+        }
+      },
+      getNotes: () => notes,
+      getProfile: () => profile,
+      isBusy: (id?: string) => recording && (!id || id === recId),
+      onStatus(st, pending) {
+        if (st === 'synced') {
+          syncLabel = 'All lectures are saved to your account.';
+        } else if (st === 'syncing') {
+          syncLabel = 'Saving to your account...';
+        } else if (st === 'offline') {
+          syncLabel = 'Offline. ' + pending + ' waiting to upload.';
+        } else if (st === 'error') {
+          syncLabel = 'Could not sync right now. It will try again.';
+        } else {
+          syncLabel = '';
+        }
+        const row = document.getElementById('sync-row');
+        if (row) {
+          row.textContent = syncText();
+        }
+      },
+    });
+    cloudOn = true;
+    window.setTimeout(() => {
+      if (authState === 'loading') {
+        authState = 'out';
+        render();
+      }
+    }, 10000);
+  } catch {
+    /* Firebase could not start: keep the app working on this phone only. */
+    cloudOn = false;
+    authState = 'in';
+    render();
+  }
 }
 
 /* ---------- events ---------- */
@@ -2729,6 +3046,9 @@ function handleAction(action: string, el: HTMLElement): void {
       if (recording && recId === id) {
         stopRecording();
       }
+      if (cloudOn) {
+        cloud.markDeleted([id]);
+      }
       notes = notes.filter(x => x.id !== id);
       saveNotes();
       closeModal();
@@ -2815,15 +3135,39 @@ function handleAction(action: string, el: HTMLElement): void {
     case 'wipe-all':
       openModal(`
         <h2 class='font-display text-xl font-bold'>Delete all lectures?</h2>
-        <p class='mt-2 text-sm text-muted'>Every lecture and note on this phone will be removed. Your profile and settings stay. This cannot be undone.</p>
+        <p class='mt-2 text-sm text-muted'>Every lecture and note will be removed from this phone and from your account, on all your devices. Your profile and settings stay. This cannot be undone.</p>
         <div class='mt-5 flex gap-2'>
           <button data-action='close-modal' class='btn-ghost flex-1'>Cancel</button>
           <button data-action='confirm-wipe' class='btn-danger flex-1'>Delete all</button>
         </div>`);
       break;
+    case 'auth-mode':
+      authMode = v === 'signup' ? 'signup' : v === 'reset' ? 'reset' : 'signin';
+      renderAuth();
+      break;
+    case 'auth-pw-toggle': {
+      const pw = document.getElementById('a-pass') as HTMLInputElement | null;
+      if (pw) {
+        pw.type = pw.type === 'password' ? 'text' : 'password';
+        el.textContent = pw.type === 'password' ? 'Show' : 'Hide';
+      }
+      break;
+    }
+    case 'sign-out':
+      openSignOut();
+      break;
+    case 'confirm-sign-out':
+      void doSignOut(false);
+      break;
+    case 'force-sign-out':
+      void doSignOut(true);
+      break;
     case 'confirm-wipe':
       if (recording) {
         stopRecording();
+      }
+      if (cloudOn) {
+        cloud.markDeleted(notes.map(x => x.id));
       }
       notes = [];
       recId = null;
@@ -2847,7 +3191,9 @@ document.addEventListener('click', e => {
 document.addEventListener('submit', e => {
   const form = e.target as HTMLFormElement;
   e.preventDefault();
-  if (form.id === 'new-form') {
+  if (form.id === 'auth-form') {
+    void submitAuth();
+  } else if (form.id === 'new-form') {
     const data = new FormData(form);
     const title =
       String(data.get('title') || '').trim() || 'Lecture on ' + fmtDate(Date.now());
@@ -3046,6 +3392,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     syncDuration();
     saveNotes();
+    if (cloudOn) {
+      cloud.pushNow();
+    }
   }
 });
 
@@ -3094,6 +3443,9 @@ function registerOffline(): void {
 window.addEventListener('pagehide', () => {
   syncDuration();
   saveNotes();
+  if (cloudOn) {
+    cloud.pushNow();
+  }
 });
 window.setInterval(() => {
   syncDuration();
@@ -3115,5 +3467,6 @@ try {
 applyTheme();
 tidyOldNotes();
 render();
+initAccounts();
 refreshLocalState();
 registerOffline();

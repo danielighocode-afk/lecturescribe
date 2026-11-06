@@ -13,3 +13,13 @@ uses the phone's own speech service instead of Chrome's web version.
 5. Send the APK to your phone and install it (allow "install unknown apps").
 
 If a step fails, open it in the run log and send me the red error lines.
+
+## Accounts and saved data (Firebase)
+Sign-in uses Firebase Authentication (email and password). Lectures and the
+profile are saved to Firestore under `users/{uid}`, and a copy always stays on
+the phone so the app still works with no internet.
+
+One-time setup in the Firebase console (project `lecturescribe-13270`):
+1. **Authentication** > Sign-in method > turn on **Email/Password**.
+2. **Firestore Database** > Create database (production mode, pick a region).
+3. Firestore > **Rules** > paste the contents of `firestore.rules` > Publish.
