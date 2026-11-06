@@ -41,19 +41,56 @@ else
   echo "icons skipped (ImageMagick missing)"
 fi
 
-# 3. Keep the screen on while the app is open so recording is not cut off in class
+# 3. MainActivity: keep the screen on while recording, and hand Google sign-in
+#    results to the social login plugin
 JAVA=$(find android/app/src/main/java -name MainActivity.java | head -1)
-if [ -n "$JAVA" ] && grep -q 'public class MainActivity extends BridgeActivity {}' "$JAVA"; then
-  python3 - "$JAVA" <<'PY'
-import sys, re
-p = sys.argv[1]
-s = open(p, encoding='utf-8').read()
-s = re.sub(r'(package [^;]+;)', r'\1\n\nimport android.os.Bundle;\nimport android.view.WindowManager;', s, count=1)
-s = s.replace('public class MainActivity extends BridgeActivity {}',
- 'public class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(Bundle savedInstanceState) {\n        super.onCreate(savedInstanceState);\n        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);\n    }\n}')
-open(p, 'w', encoding='utf-8').write(s)
-print('keep-screen-on ok')
-PY
+if [ -n "$JAVA" ]; then
+  PKG=$(grep -m1 '^package ' "$JAVA" | sed 's/package //; s/;//; s/[[:space:]]//g')
+  cat > "$JAVA" <<EOF
+package $PKG;
+
+import android.content.Intent;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.WindowManager;
+import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginHandle;
+import ee.forgr.capacitor.social.login.GoogleProvider;
+import ee.forgr.capacitor.social.login.ModifiedMainActivityForSocialLoginPlugin;
+import ee.forgr.capacitor.social.login.SocialLoginPlugin;
+
+public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode >= GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MIN && requestCode < GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MAX) {
+            PluginHandle pluginHandle = getBridge().getPlugin("SocialLogin");
+            if (pluginHandle == null) {
+                Log.i("Google Activity Result", "SocialLogin login handle is null");
+                return;
+            }
+            Plugin plugin = pluginHandle.getInstance();
+            if (!(plugin instanceof SocialLoginPlugin)) {
+                Log.i("Google Activity Result", "SocialLogin plugin instance is not SocialLoginPlugin");
+                return;
+            }
+            ((SocialLoginPlugin) plugin).handleGoogleLoginIntent(requestCode, data);
+        }
+    }
+
+    // Required by the social login plugin. Never called.
+    @Override
+    public void IHaveModifiedTheMainActivityForTheUseWithSocialLoginPlugin() {}
+}
+EOF
+  echo "main activity ok"
 else
-  echo "keep-screen-on skipped"
+  echo "main activity skipped"
 fi

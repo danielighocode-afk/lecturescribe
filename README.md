@@ -23,3 +23,10 @@ One-time setup in the Firebase console (project `lecturescribe-13270`):
 1. **Authentication** > Sign-in method > turn on **Email/Password**.
 2. **Firestore Database** > Create database (production mode, pick a region).
 3. Firestore > **Rules** > paste the contents of `firestore.rules` > Publish.
+
+## Google sign-in
+Uses `@capgo/capacitor-social-login` (Android's own account picker). In the app:
+1. Put the Web client ID in `GOOGLE_WEB_CLIENT_ID` in `src/cloud.ts`.
+2. The build signs every APK with `lecturescribe-debug.keystore`, so its SHA-1
+   stays the same. Add that SHA-1 to the Android app in Firebase project settings.
+3. This keystore is for testing only. Use a private release key for the Play Store.

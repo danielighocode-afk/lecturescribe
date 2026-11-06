@@ -35,6 +35,13 @@ jobs:
       - name: Copy the web app into Android
         run: npx cap sync android
 
+      - name: Use the fixed signing key
+        run: |
+          mkdir -p ~/.android
+          cp lecturescribe-debug.keystore ~/.android/debug.keystore
+          echo "Signing key fingerprint (add this SHA-1 in Firebase):"
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android | grep -E "SHA1|SHA256"
+
       - name: Build the APK
         working-directory: android
         run: |

@@ -13,6 +13,8 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  GoogleAuthProvider,
+  signInWithCredential,
   type Auth,
   type User,
 } from 'firebase/auth';
@@ -35,6 +37,10 @@ const firebaseConfig = {
   messagingSenderId: '62757005781',
   appId: '1:62757005781:web:110a56b598a85af0aaf55c',
 };
+
+/* The Web client ID of the Google sign-in. Firebase console > Authentication >
+   Sign-in method > Google > Web SDK configuration > Web client ID. */
+const GOOGLE_WEB_CLIENT_ID = 'PASTE_WEB_CLIENT_ID_HERE';
 
 const SYNC_KEY = 'lecturescribe-sync-v1';
 const MAX_DOC_CHARS = 900000; /* Firestore documents are limited to about 1 MB */
@@ -481,6 +487,27 @@ export async function signUp(email: string, password: string): Promise<void> {
   await createUserWithEmailAndPassword(auth, email, password);
 }
 
+let googleReady = false;
+
+/** Google sign-in through the phone's own account picker (Android app only). */
+export async function signInWithGoogle(): Promise<void> {
+  if (GOOGLE_WEB_CLIENT_ID.indexOf('PASTE') === 0) {
+    throw { code: 'app/google-not-set-up' };
+  }
+  const mod: any = await import('@capgo/capacitor-social-login');
+  const SocialLogin = mod.SocialLogin;
+  if (!googleReady) {
+    await SocialLogin.initialize({ google: { webClientId: GOOGLE_WEB_CLIENT_ID } });
+    googleReady = true;
+  }
+  const res: any = await SocialLogin.login({ provider: 'google', options: {} });
+  const idToken = res && res.result && res.result.idToken;
+  if (!idToken) {
+    throw { code: 'app/google-no-token' };
+  }
+  await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+}
+
 export async function signIn(email: string, password: string): Promise<void> {
   await signInWithEmailAndPassword(auth, email, password);
 }
@@ -517,11 +544,35 @@ export function unsyncedCount(): number {
 
 export async function signOutUser(): Promise<void> {
   stopSync(); /* nothing may be uploaded or deleted after this point */
+  if (googleReady) {
+    try {
+      const mod: any = await import('@capgo/capacitor-social-login');
+      await mod.SocialLogin.logout({ provider: 'google' });
+    } catch {
+      /* the phone's Google account stays as it was; signing out of the app still works */
+    }
+  }
   await signOut(auth);
 }
 
 export function friendlyAuthError(e: any): string {
   const code = String((e && e.code) || '');
+  const msg = String((e && e.message) || e || '');
+  if (code === 'app/google-not-set-up') {
+    return 'Google sign-in is not set up yet in this build.';
+  }
+  if (code === 'app/google-no-token') {
+    return 'Google did not return a sign-in. Try again.';
+  }
+  if (/cancel/i.test(code + ' ' + msg)) {
+    return 'Google sign-in was cancelled.';
+  }
+  if (/28444|developer console/i.test(msg)) {
+    return 'Google sign-in is not set up correctly for this build. The signing fingerprint may be missing in Firebase.';
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'There is already an account with that email. Sign in with your password instead.';
+  }
   switch (code) {
     case 'auth/invalid-email':
       return 'That email address does not look right.';
